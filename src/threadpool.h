@@ -77,7 +77,7 @@ public:
 
 
     ~ThreadPool() {
-        join();
+        JoinAll();
     }
 
     
@@ -90,7 +90,7 @@ public:
         return queue.size();
     }
 
-    void addThread( std::function<void(void)> job ) {
+    void AddJob( std::function<void(void)> job ) {
         std::lock_guard<std::mutex> guard( queue_mutex );
         queue.emplace_back( job );
         ++jobs_left;
@@ -98,7 +98,7 @@ public:
     }
 
 
-    void join( bool WaitForAll = true ) {
+    void JoinAll( bool WaitForAll = true ) {
         if( !finished ) {
             if( WaitForAll ) {
                 WaitAll();
