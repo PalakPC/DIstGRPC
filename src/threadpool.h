@@ -1,132 +1,122 @@
+/*
+ * CS 6210 - Fall 2017
+ * Project 3
+ * Threadpool management
+ */
+
 #pragma once
 
-#ifndef CONCURRENT_THREADPOOL_H
-#define CONCURRENT_THREADPOOL_H
+#ifndef THREADPOOL_H
+#define THREADPOOL_H
 
+#include <iostream>
 #include <atomic>
 #include <thread>
 #include <mutex>
-#include <array>
 #include <vector>
 #include <list>
-#include <iostream>
-#include <functional>
 #include <condition_variable>
 
+class threadpool {
+   public:
+      threadpool(unsigned num_threads)
+         : threads(num_threads), rem(0), giveup(false), done(false) 
+      {	
+         unsigned int i;
+         printf("Maximum threads in threadpool:\t%u\n", num_threads);
 
+         for(i = 0; i < num_threads; i++)
+         {
+            threads[i] = std::move(std::thread([this, i]{this->task();}));
+         }
+      }
 
-//namespace nbsdx {
-//namespace concurrent {
+      ~threadpool() 
+      {
+         joinAll();
+      }
+      
+      void addJob(std::function<void()> job) 
+      {
+         std::lock_guard<std::mutex> lock(m_queue);
+         job_queue.emplace_back(job);
+         rem++;
+         is_avail.notify_one();
+      }
 
-
-//template <unsigned ThreadCount_=10>
-class ThreadPool {
-	
-    std::vector<std::thread> threads;
-    std::list<std::function<void(void)>> queue;
-
-    std::atomic_int         jobs_left;
-    std::atomic_bool        bailout;
-    std::atomic_bool        finished;
-    std::condition_variable job_available_var;
-    std::condition_variable wait_var;
-    std::mutex              wait_mutex;
-    std::mutex              queue_mutex;
-
-   
-    void Task() {
-        while( !bailout ) {
-            next_job()();
-            --jobs_left;
-            wait_var.notify_one();
-        }
-    }
-
-    
-    std::function<void(void)> next_job() {
-        std::function<void(void)> res;
-        std::unique_lock<std::mutex> job_lock( queue_mutex );
-
-        // Wait for a job if we don't have any.
-        job_available_var.wait( job_lock, [this]() ->bool { return queue.size() || bailout; } );
-        
-        // Get job from the queue
-        if( !bailout ) {
-            res = queue.front();
-            queue.pop_front();
-        }
-        else { // If we're bailing out, 'inject' a job into the queue to keep jobs_left accurate.
-            res = []{};
-            ++jobs_left;
-        }
-        return res;
-    }
-
-public:
-	//ThreadPool(unsigned r) { ThreadCount = r; }
-	unsigned ThreadCount;
-    ThreadPool(unsigned ThreadCount_)
-    	: threads(ThreadCount_) 
-        , jobs_left( 0 )
-        , bailout( false )
-        , finished( false ) 
-    {	ThreadCount = ThreadCount_;
-        for( unsigned i = 0; i < ThreadCount; ++i )
-            threads[ i ] = std::move( std::thread( [this,i]{ this->Task(); } ) );
-    }
-
-
-    ~ThreadPool() {
-        JoinAll();
-    }
-
-    
-    inline unsigned Size() const {
-        return ThreadCount;
-    }
-
-    inline unsigned JobsRemaining() {
-        std::lock_guard<std::mutex> guard( queue_mutex );
-        return queue.size();
-    }
-
-    void AddJob( std::function<void(void)> job ) {
-        std::lock_guard<std::mutex> guard( queue_mutex );
-        queue.emplace_back( job );
-        ++jobs_left;
-        job_available_var.notify_one();
-    }
-
-
-    void JoinAll( bool WaitForAll = true ) {
-        if( !finished ) {
-            if( WaitForAll ) {
-                WaitAll();
+      void joinAll() 
+      {
+         bool wait_all = true;
+         if (!done) 
+         {
+            if (wait_all)
+            {
+               all_wait();
             }
 
-            // note that we're done, and wake up any thread that's
-            // waiting for a new job
-            bailout = true;
-            job_available_var.notify_all();
+            giveup = true;
+            is_avail.notify_all();
+            for (auto &x : threads)
+            {
+               if(x.joinable())
+               {
+                  x.join();
+               }
+            }
+            done = true;
+         }
+      }
 
-            for( auto &x : threads )
-                if( x.joinable() )
-                    x.join();
-            finished = true;
-        }
-    }
+      void all_wait() 
+      {
+         if (rem) 
+         {
+            std::unique_lock<std::mutex> lock(m_wait);
+            is_wait.wait(lock, [this]{return (this->rem == 0);});
+            lock.unlock();
+         }
+      }
 
-   
-    void WaitAll() {
-        if( jobs_left > 0 ) {
-            std::unique_lock<std::mutex> lk( wait_mutex );
-            wait_var.wait( lk, [this]{ return this->jobs_left == 0; } );
-            lk.unlock();
-        }
-    }
+   private:
+      void task() 
+      {
+         while (!giveup)
+         {
+            next_task()();
+            rem--;
+            is_wait.notify_one();
+         }
+      }
+
+      std::function<void()> next_task() 
+      {
+         std::function<void()> task;
+         std::unique_lock<std::mutex> lock(m_queue);
+
+         is_avail.wait(lock, [this]()->bool{return (job_queue.size() || giveup);});
+
+         if (!giveup)
+         {
+            task = job_queue.front();  //first task on queue
+            job_queue.pop_front();  //Remove task from queue
+         }
+         else 
+         { 
+            task = []{};
+            rem++;
+         }
+         return task;
+      }
+
+      std::vector<std::thread> threads;
+      std::list<std::function<void()>> job_queue;
+      std::atomic_int rem;
+      std::atomic_bool giveup;
+      std::atomic_bool done;
+      std::condition_variable is_avail;
+      std::condition_variable is_wait;
+      std::mutex m_wait;
+      std::mutex m_queue;
 };
 
-//} 
-//} 
-
-#endif //CONCURRENT_THREADPOOL_H
+#endif

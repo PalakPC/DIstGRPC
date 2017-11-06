@@ -1,9 +1,15 @@
+/*
+ * CS 6210 - Fall 2017
+ * Project 3
+ * Store management 
+ */
+
 # include <iostream>
 # include <memory>
 # include <string>
-# include <sstream>
 # include <thread>
-# include <fstream>
+# include <sstream>  //For ostringstream
+# include <fstream>  //for ifstream
 
 # include <grpc++/grpc++.h>
 # include <grpc/support/log.h>
@@ -34,7 +40,13 @@ using store::ProductReply;
 using store::ProductInfo;
 using store::Store;
 
-class VendorStub { 
+std::string store_address; //For storing store's address
+
+/*
+ * Client part
+ */
+
+class VendorStub {
    public:
       explicit VendorStub(std::shared_ptr<Channel> channel) 
          : stub_(Vendor::NewStub(channel))
@@ -65,7 +77,7 @@ class VendorStub {
          {
             std::ostringstream price;
             
-            price << bidReply.price();
+            price << bidReply.price(); 
             return "Vendor ID:\t" + bidReply.vendor_id() + "\tProduct Name:\t" + product_name+ "\tPrice:\t" + price.str() + "\n";
          }
          else
@@ -83,10 +95,14 @@ std::string stub_call(std::string product_name, std::string ip)
    std::string stubReply;
 
    VendorStub vendorStub(grpc::CreateChannel(ip, grpc::InsecureChannelCredentials()));
-   stubReply = vendorStub.getBidDetails(product_name) ;
-   std::cout << "Bid Received - \t" << stubReply << "\n";
+   stubReply = vendorStub.getBidDetails(product_name);
+   std::cout << "Bid - \t" << stubReply << "\n";   //Return string from vendor
    return stubReply;
 }
+
+/*
+ * Server part
+ */
 
 class Store_Server final
 {
@@ -97,16 +113,16 @@ class Store_Server final
          cq_->Shutdown();
       }
 
-      void runStore()
+      void runStore(std::string address)
       {
          ServerBuilder builder;
-         std::string server_address("localhost:50056");
+         std::string server_address(address);
          
          builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
          builder.RegisterService(&service_);
          cq_ = builder.AddCompletionQueue();
          server_ = builder.BuildAndStart();
-         std::cout << "Store listening on:\t" << server_address << "\n";
+         std::cout << "Store address:\t" << server_address << "\n";
          handleRpcs();
       }
 
@@ -130,6 +146,7 @@ class Store_Server final
                else if (status_ == PROCESS)
                {
                   new ClientCall (service_, cq_);
+                  
                   std::vector<std::string> ip;
                   std::string address;
                   std::ifstream file("vendor_addresses.txt");
@@ -142,11 +159,11 @@ class Store_Server final
                   for(int i = 0; i < ip.size(); i++)
                   {
                      std::string product_name = request_.product_name();
-                     std::string reply_c = stub_call(product_name, ip[i]);
+                     std::string reply_c = stub_call(product_name, ip[i]); //To get vendor's reply
                      ProductInfo product;
                      product.set_vendor_id(reply_c);
                   
-                     reply_.add_products()->CopyFrom(product);
+                     reply_.add_products()->CopyFrom(product); //Reply to client
                      reply_.products(0).vendor_id();
                      reply_.products(0).price();
                   }
@@ -200,7 +217,7 @@ class Store_Server final
 int run_store()
 {
    Store_Server server;
-   server.runStore();
+   server.runStore(store_address);
    return 0;
 }
 
@@ -215,29 +232,28 @@ int main(int argc, char** argv) {
    //	return EXIT_SUCCESS;
 
    unsigned int max_threads;
-   std::string address;
+   //std::string address;
 
    if (argc == 3)
    {
-      address = std::string(argv[1]);
+      store_address = std::string(argv[1]);
       max_threads = atoi(argv[2]);
    }
    else if (argc == 2)
    {
-      address = std::string(argv[1]);
+      store_address = std::string(argv[1]);
       max_threads = 5;
    }
    else
    {
-      address = "localhost:50056";
+      store_address = std::string("localhost:50040");
       max_threads = 5;
    }
 
-   ThreadPool my_pool(max_threads);
-   my_pool.AddJob(&run_store);
+   threadpool my_pool(max_threads);
+   my_pool.addJob(&run_store);
 
-   my_pool.JoinAll();
+   my_pool.joinAll();
 
    return EXIT_SUCCESS;
 }
-
