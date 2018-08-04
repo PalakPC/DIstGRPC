@@ -5,6 +5,6 @@ The default parameters are as follows:
 
 These can be changed through command line arguments as follows:
 
-./store <store address> <maximum number of threads>
+./store \<store address\> \<maximum number of threads\>
 
 However, both are optional.
